@@ -26,10 +26,10 @@ def master(comm):
                     string = f.readline()[:-1]
                     while string:
                         items = string.split("\t")
-			checksum = items[0]
-			mtime = items[1]
-			inode = items[2]
-			filename = "\t".join(items[3:])
+                        checksum = items[0]
+                        mtime = items[1]
+                        inode = items[2]
+                        filename = "\t".join(items[3:])
                         checksums[os.path.join(root,name,filename)] = (mtime, inode)
                         string = f.readline()[:-1]
 
@@ -45,55 +45,47 @@ def master(comm):
                     update.append(filename)  # todo sort it here.
             elif CHECKSUMFILE not in filename and ".py" not in filename:  # exclude .crc32 file
                 update.append(filename)
-
+    changed_file = set(update)
     update.sort(key=lambda f: os.stat(f).st_size)  # sort the files for load balance.
-    # Increasing order, because we use it as stack.
+    # Increasing order, because we use it as a stack.
 
     results = defaultdict(list)
 
-    #  handle the situation where the updated files is less than the number of processors.
-    if len(update) < num_procs:
-        for i in range(len(update)):
-            comm.send(update[i], dest=i+1, tag=WORKTAG)
-        for i in range(len(update)):
-            result = comm.recv(source=MPI.ANY_SOURCE, tag=MPI.ANY_TAG, status=status)
-            results[result[0]].append(result[1])
-        for i in range(1,num_procs):
-            comm.send(0,dest = i, tag=DIETAG)
-    else:
+    num_init_message = min(num_procs,len(update))
+    # send jobs to different slave
+    for rank in range(1, num_init_message):
+        if update:
+            filename = update.pop()
+            comm.send(filename, dest=rank, tag=WORKTAG)
 
-        # send jobs to different slave
-        for rank in range(1, num_procs):
-            if update:
-                filename = update.pop()
-                comm.send(filename, dest=rank, tag=WORKTAG)
-os.walk
+    # The loop of receive and send.
+    while True:
+        if not update:
+            break
+        result = comm.recv(source=MPI.ANY_SOURCE, tag=MPI.ANY_TAG, status=status)  # receive results
+        results[result[0]].append(result[1])
+        comm.send(update.pop(), dest=status.Get_source(), tag=WORKTAG)
 
+    # finish all works
+    for rank in range(1, num_init_message):
+        result = comm.recv(source=MPI.ANY_SOURCE, tag=MPI.ANY_TAG, status=status)  # receive results
+        results[result[0]].append(result[1])
 
-        # The loop of receive and send.
-        while True:
-            if not update:
-                break
-            result = comm.recv(source=MPI.ANY_SOURCE, tag=MPI.ANY_TAG, status=status)  # receive results
-            results[result[0]].append(result[1])
-            comm.send(update.pop(), dest=status.Get_source(), tag=WORKTAG)
+    for rank in range(1, num_procs):
+        comm.send(0, dest=rank, tag=DIETAG)
 
-        # finish all works
-        for rank in range(1, num_procs):
-            result = comm.recv(source=MPI.ANY_SOURCE, tag=MPI.ANY_TAG, status=status)  # receive results
-            results[result[0]].append(result[1])
-        for rank in range(1, num_procs):
-            comm.send(0, dest=rank, tag=DIETAG)
 
 
     for root in results:
-        new_f = open(os.path.join(root,CHECKSUMFILE+"_tmp"),"w")
-        if os.path.isfile(os.path.join(root,CHECKSUMFILE)):
-            with open(os.path.join(root,CHECKSUMFILE)) as f:
-                string = f.readline()
+        new_f = open(os.path.join(root, CHECKSUMFILE+"_tmp"), "w", encoding="utf-8")
+        if os.path.isfile(os.path.join(root, CHECKSUMFILE)):
+            with open(os.path.join(root, CHECKSUMFILE)) as f:
+                string = f.readline()[:-1]
                 while string:
-                    new_f.write(string)
-                    string = f.readline()
+                    filename = "\t".join(string.split("\t")[3:])
+                    if filename not in changed_file:
+                        new_f.write(string)
+                    string = f.readline()[:-1]
         for result in results[root]:
             new_f.write(result)
         new_f.close()
@@ -148,13 +140,12 @@ def print_to_terminal():
                     line = f.readline()
                     while line:
                         items = line.split("\t")
-			checksum = items[0]
-			mtime = items[1]
-			inode = items[2]
-			filename = "\t".join(items[3:])
-                        filename = os.path.join(root,dir,filename)
-                        print(" ".join((checksum,str(os.path.getsize(filename)),filename,filename)))
-                        line = f.readline()
+            checksum = items[0]
+
+            filename = "\t".join(items[3:])
+            filename = os.path.join(root,dir,filename)
+            print(" ".join((checksum,str(os.path.getsize(filename)),filename,filename)))
+            line = f.readline()
                                                                                                                                                                     
                    
 
